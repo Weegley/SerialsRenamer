@@ -13,6 +13,24 @@ Series Title [kp1234567][tt1234567]/
     └── ...
 ```
 
+## Important note about API key
+
+This script uses **Kinopoisk Api Unofficial** as its data source:
+<https://kinopoiskapiunofficial.tech/>
+
+By default, the script contains a shared API key for **Kinopoisk Api Unofficial**.
+
+This is convenient for quick testing, but for regular use it is strongly recommended to replace it with **your own API key**.
+
+Why:
+- shared keys can hit rate limits
+- shared keys may stop working unexpectedly
+- using your own key is more reliable and predictable
+
+In other words: the bundled key is fine for trying the script, but for real usage you should set your own key in the script.
+
+---
+
 The script is designed to be interactive, conservative, and filesystem-safe:
 
 - it can preview changes before applying them
