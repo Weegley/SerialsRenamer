@@ -15,8 +15,7 @@ Series Title [kp1234567][tt1234567]/
 
 ## Important note about API key
 
-This script uses **Kinopoisk Api Unofficial** as its data source:
-<https://kinopoiskapiunofficial.tech/>
+This script uses [**Kinopoisk Api Unofficial**](https://kinopoiskapiunofficial.tech/) as its data source.
 
 By default, the script contains a shared API key for **Kinopoisk Api Unofficial**.
 
