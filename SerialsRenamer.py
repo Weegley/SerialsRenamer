@@ -182,8 +182,8 @@ RU_SEASON_FOLDER_TEMPLATE = "Season {season:02d}"
 INTL_SEASON_FOLDER_TEMPLATE = "Season {season:02d}"
 RU_EPISODE_FILE_TEMPLATE = "S{season:02d}E{episode:02d}{ext}"
 INTL_EPISODE_FILE_TEMPLATE = "S{season:02d}E{episode:02d}{ext}"
-RU_SUBTITLE_FILE_TEMPLATE = "S{season:02d}E{episode:02d}.{subtype}.{lang}{ext}"
-INTL_SUBTITLE_FILE_TEMPLATE = "S{season:02d}E{episode:02d}.{subtype}.{lang}{ext}"
+RU_SUBTITLE_FILE_TEMPLATE = "S{season:02d}E{episode:02d}{sub_suffix}{ext}"
+INTL_SUBTITLE_FILE_TEMPLATE = "S{season:02d}E{episode:02d}{sub_suffix}{ext}"
 
 VIDEO_EXTS = {".mkv", ".mp4", ".avi", ".mov", ".m4v", ".ts"}
 SUB_EXTS = {".srt", ".ass", ".ssa", ".sub"}
@@ -193,7 +193,7 @@ SERIES_TYPES = {"TV_SERIES", "MINI_SERIES"}
 
 ALLOWED_TEMPLATE_FIELDS = {
     "title", "series_title", "original_title", "title_local",
-    "kp", "tt", "tmdb", "year", "season", "episode", "lang", "subtype", "ext",
+    "kp", "tt", "tmdb", "year", "season", "episode", "lang", "subtype", "sub_suffix", "ext",
 }
 
 LANG_FIELD_PATTERN = re.compile(r"^title_[A-Za-z]{2,3}(?:_[A-Za-z]{2,4})?$")
@@ -258,6 +258,7 @@ class FileEntry:
     episode: Optional[int] = None
     lang: Optional[str] = None
     subtype: Optional[str] = None
+    sub_suffix: Optional[str] = None
     ext: str = ""
 
 
@@ -551,14 +552,15 @@ def detect_episode_info(stem: str, known_season: Optional[int]) -> Tuple[Optiona
 
 def detect_sub_meta(stem: str, parent_name: str) -> Tuple[Optional[str], Optional[str]]:
     low = f"{parent_name} {stem}".lower()
+    low_sep = re.sub(r"[._-]+", " ", low)
     lang = None
     subtype = None
     for token, code in LANG_TOKENS.items():
-        if re.search(rf"\b{re.escape(token)}\b", low):
+        if re.search(rf"\b{re.escape(token)}\b", low_sep):
             lang = code
             break
     for token, code in SUBTYPE_TOKENS.items():
-        if re.search(rf"\b{re.escape(token)}\b", low):
+        if re.search(rf"\b{re.escape(token)}\b", low_sep):
             subtype = code
             break
     return lang, subtype
@@ -569,6 +571,58 @@ def normalize_pairing_stem(stem: str) -> str:
     stem = stem.rstrip(".")
     stem = re.sub(r"\s+", " ", stem)
     return stem.casefold()
+
+
+def normalize_subtitle_suffix(suffix: Optional[str]) -> str:
+    suffix = str(suffix or "").strip()
+    if not suffix:
+        return ""
+    suffix = suffix.replace(" ", ".").replace("_", ".").replace("-", ".")
+    suffix = re.sub(r"\.+", ".", suffix)
+    if not suffix.startswith("."):
+        suffix = "." + suffix
+    return suffix.rstrip(".")
+
+
+def extract_subtitle_suffix(subtitle_stem: str, video_stem: str) -> Optional[str]:
+    sub_clean = subtitle_stem.strip().rstrip(".")
+    video_clean = video_stem.strip().rstrip(".")
+    if not sub_clean or not video_clean:
+        return None
+    sub_cf = sub_clean.casefold()
+    video_cf = video_clean.casefold()
+
+    if sub_cf == video_cf:
+        return ""
+
+    if not sub_cf.startswith(video_cf):
+        return None
+
+    suffix = sub_clean[len(video_clean):]
+    if not suffix:
+        return ""
+
+    if suffix[0] not in "._- ":
+        return None
+
+    return normalize_subtitle_suffix(suffix)
+
+
+def find_matching_video_stem(group: "SeriesGroup", sub_entry: FileEntry) -> Optional[str]:
+    if sub_entry.season is None or sub_entry.episode is None:
+        return None
+    candidates: List[str] = []
+    for fe in group.files:
+        if fe.kind != "video":
+            continue
+        if fe.path.parent != sub_entry.path.parent:
+            continue
+        if fe.season == sub_entry.season and fe.episode == sub_entry.episode:
+            candidates.append(fe.path.stem)
+    if not candidates:
+        return None
+    candidates.sort(key=len, reverse=True)
+    return candidates[0]
 
 
 def infer_series_root(start: Path, root: Path) -> Tuple[Path, Optional[int], str, MediaIDs]:
@@ -901,7 +955,7 @@ def fetch_tmdb_localized_titles(tmdb: TMDbClient, tmdb_id: Optional[str], langua
     return titles
 
 
-def build_template_values(series_title: str, original_title: Optional[str], ids: MediaIDs, year: Optional[str], localized_titles: Optional[Dict[str, str]] = None, title_local: Optional[str] = None, season: Optional[int] = None, episode: Optional[int] = None, lang: Optional[str] = None, subtype: Optional[str] = None, ext: Optional[str] = None) -> Dict[str, Any]:
+def build_template_values(series_title: str, original_title: Optional[str], ids: MediaIDs, year: Optional[str], localized_titles: Optional[Dict[str, str]] = None, title_local: Optional[str] = None, season: Optional[int] = None, episode: Optional[int] = None, lang: Optional[str] = None, subtype: Optional[str] = None, sub_suffix: Optional[str] = None, ext: Optional[str] = None) -> Dict[str, Any]:
     main_title = normalize_spaces(series_title or "")
     main_key = normalize_title_key(main_title)
 
@@ -918,6 +972,7 @@ def build_template_values(series_title: str, original_title: Optional[str], ids:
         "episode": episode if episode is not None else "",
         "lang": lang or "",
         "subtype": subtype or "",
+        "sub_suffix": normalize_subtitle_suffix(sub_suffix),
         "ext": ext or "",
     }
 
@@ -963,9 +1018,26 @@ def render_episode_file_name(metadata_profile: str, series_title: str, original_
     return render_template(template, build_template_values(series_title, original_title, ids, year, localized_titles=localized_titles, title_local=title_local, season=season, episode=episode, ext=ext.lower()), True)
 
 
-def render_subtitle_file_name(metadata_profile: str, series_title: str, original_title: Optional[str], ids: MediaIDs, year: Optional[str], season: int, episode: int, ext: str, lang: Optional[str], subtype: Optional[str], localized_titles: Optional[Dict[str, str]] = None, title_local: Optional[str] = None) -> str:
+def render_subtitle_file_name(metadata_profile: str, series_title: str, original_title: Optional[str], ids: MediaIDs, year: Optional[str], season: int, episode: int, ext: str, lang: Optional[str], subtype: Optional[str], sub_suffix: Optional[str] = None, localized_titles: Optional[Dict[str, str]] = None, title_local: Optional[str] = None) -> str:
     template = get_profile_templates(metadata_profile)["subtitle"]
-    return render_template(template, build_template_values(series_title, original_title, ids, year, localized_titles=localized_titles, title_local=title_local, season=season, episode=episode, lang=lang, subtype=subtype, ext=ext.lower()), True)
+    return render_template(
+        template,
+        build_template_values(
+            series_title,
+            original_title,
+            ids,
+            year,
+            localized_titles=localized_titles,
+            title_local=title_local,
+            season=season,
+            episode=episode,
+            lang=lang,
+            subtype=subtype,
+            sub_suffix=sub_suffix,
+            ext=ext.lower(),
+        ),
+        True,
+    )
 
 
 def scan_tree(root: Path) -> Dict[Path, SeriesGroup]:
@@ -993,7 +1065,7 @@ def scan_tree(root: Path) -> Dict[Path, SeriesGroup]:
         lang = subtype = None
         if kind == "sub":
             lang, subtype = detect_sub_meta(stem, path.parent.name)
-        groups[series_dir].files.append(FileEntry(path=path, relpath=rel, kind=kind, season=season, episode=episode, lang=lang, subtype=subtype, ext=ext))
+        groups[series_dir].files.append(FileEntry(path=path, relpath=rel, kind=kind, season=season, episode=episode, lang=lang, subtype=subtype, sub_suffix=None, ext=ext))
     return groups
 
 
@@ -1170,12 +1242,14 @@ def interactive_search_loop_kp(group: SeriesGroup, kp: KPClient, initial_query: 
 
 def find_paired_subtitles(group: SeriesGroup, video_entry: FileEntry, used_subs: Set[Path]) -> List[FileEntry]:
     matches: List[FileEntry] = []
-    video_stem = normalize_pairing_stem(video_entry.path.stem)
     for fe in group.files:
         if fe.kind != "sub" or fe.path in used_subs or fe.path.parent != video_entry.path.parent:
             continue
-        if normalize_pairing_stem(fe.path.stem) == video_stem:
-            matches.append(fe)
+        suffix = extract_subtitle_suffix(fe.path.stem, video_entry.path.stem)
+        if suffix is None:
+            continue
+        fe.sub_suffix = suffix
+        matches.append(fe)
     return sorted(matches, key=lambda x: x.path.name.lower())
 
 
@@ -1208,7 +1282,7 @@ def build_fallback_ops(group: SeriesGroup, series_target_dir: Path, resolved_tit
                 fallback_ops.append(PlannedOp(fe.path, video_target, "move", "fallback sorted source files"))
                 used_targets.add(video_target)
             for sub in find_paired_subtitles(group, fe, used_subs):
-                new_sub_name = render_subtitle_file_name(metadata_profile, resolved_title, original_title, ids, year, season, next_episode, sub.ext, sub.lang, sub.subtype, localized_titles=group.localized_titles, title_local=resolved_title)
+                new_sub_name = render_subtitle_file_name(metadata_profile, resolved_title, original_title, ids, year, season, next_episode, sub.ext, sub.lang, sub.subtype, sub.sub_suffix, localized_titles=group.localized_titles, title_local=resolved_title)
                 sub_target = season_dir / new_sub_name
                 if sub_target in used_targets:
                     continue
@@ -1232,7 +1306,13 @@ def plan_group(root: Path, group: SeriesGroup, resolved_title: str, original_tit
         if fe.kind == "video":
             new_name = render_episode_file_name(metadata_profile, resolved_title, original_title, ids, year, fe.season, fe.episode, fe.ext, localized_titles=group.localized_titles, title_local=resolved_title)
         else:
-            new_name = render_subtitle_file_name(metadata_profile, resolved_title, original_title, ids, year, fe.season, fe.episode, fe.ext, fe.lang, fe.subtype, localized_titles=group.localized_titles, title_local=resolved_title)
+            if fe.sub_suffix is None:
+                video_stem = find_matching_video_stem(group, fe)
+                if video_stem:
+                    fe.sub_suffix = extract_subtitle_suffix(fe.path.stem, video_stem)
+                if fe.sub_suffix is None:
+                    fe.sub_suffix = ""
+            new_name = render_subtitle_file_name(metadata_profile, resolved_title, original_title, ids, year, fe.season, fe.episode, fe.ext, fe.lang, fe.subtype, fe.sub_suffix, localized_titles=group.localized_titles, title_local=resolved_title)
         target = season_dir / new_name
         if fe.path != target:
             ops.append(PlannedOp(fe.path, target, "move", "normalize episode/subtitle placement"))
