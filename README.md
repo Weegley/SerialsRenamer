@@ -19,8 +19,8 @@ Series Title (Original Title) (Year) [tmdbid-123456][imdbid-tt1234567]/
 
 This script uses:
 
-- **Kinopoisk Api Unofficial**
-- **TMDb**
+- [**Kinopoisk Api Unofficial**](https://kinopoiskapiunofficial.tech/)
+- [**TMDb**](https://www.themoviedb.org/)
 
 ### Kinopoisk Api Unofficial
 
