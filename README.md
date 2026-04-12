@@ -1,20 +1,59 @@
 # SerialsRenamer
 
+Русская версия: [README.ru.md](README.ru.md)
+
 Production-oriented Python script for normalizing TV series folders and episode files.
 
-It helps reorganize messy series collections into a predictable structure for media servers such as Jellyfin.
+It helps reorganize messy TV series collections into a predictable structure:
 
-Canonical rendered ID formats:
+```text
+Series Title (Original Title) (Year) [tmdbid-123456][imdbid-tt1234567]/
+└── Season 01/
+    ├── S01E01.mkv
+    ├── S01E01.full.rus.srt
+    ├── S01E02.mkv
+    └── ...
+```
 
-- `[kp-1234567]`
-- `[tmdbid-123456]`
-- `[imdbid-tt1234567]`
+## API keys and credentials
 
-The script can read older ID variants from existing folder names, but always renders IDs in the canonical format above.
+This script uses:
+
+- **Kinopoisk Api Unofficial**
+- **TMDb**
+
+### Kinopoisk Api Unofficial
+
+The script currently contains a bundled shared Kinopoisk Api Unofficial key in the source code for quick testing.
+
+This is convenient for trying the script, but for regular use it is **strongly recommended** to replace it with **your own Kinopoisk Api Unofficial key**.
+
+Why:
+
+- shared keys can hit rate limits
+- shared keys may stop working unexpectedly
+- your own key is more reliable and predictable
+
+### TMDb
+
+For TMDb, you should **provide your own TMDb bearer token** in the script settings.
+
+This is effectively required for real usage.
+
+Why:
+
+- TMDb is a core part of the current metadata pipeline
+- it is used directly in the `intl` profile
+- it is used for enrichment, external IDs, and localized titles in the `ru` profile
+- multilingual title fields depend on TMDb translations
+
+In short:
+
+- bundled Kinopoisk key is acceptable for quick testing
+- your own Kinopoisk key is strongly recommended
+- your own TMDb bearer token is required
 
 ---
-
-## What the script does
 
 The script is designed to be interactive, conservative, and filesystem-safe:
 
@@ -23,128 +62,99 @@ The script is designed to be interactive, conservative, and filesystem-safe:
 - it avoids aggressive guessing in ambiguous cases
 - it keeps non-empty directories instead of deleting them blindly
 - it uses fallback logic when filenames are messy but still sortable
-- it can update already normalized series root folders without touching episode files
-
----
-
-## Metadata sources and profiles
-
-The script supports two metadata profiles.
-
-### `ru`
-
-Primary use case: Russian library.
-
-Resolution flow:
-
-- primary source: Kinopoisk
-- enrichment: TMDb
-- IMDb id: Kinopoisk first, TMDb as fallback
-
-In short:
-
-`kp -> tmdb`, IMDb from KP if present, otherwise from TMDb.
-
-### `intl`
-
-Primary use case: international / English-oriented library.
-
-Resolution flow:
-
-- primary source: TMDb
-- IMDb id: TMDb
-- Kinopoisk is not used as the primary source
-
-In short:
-
-`tmdb -> imdb`
-
-### Default title language by profile
-
-There is no `--lang-priority` option anymore.
-
-The primary title is chosen automatically by profile:
-
-- `ru` -> Russian primary title
-- `intl` -> English / international primary title
-
----
-
-## Important note about API keys
-
-The script contains built-in default API credentials for quick testing:
-
-- Kinopoisk Api Unofficial key
-- TMDb bearer token
-
-This is convenient for local testing, but for regular use it is recommended to replace them with your own credentials inside the script.
-
-Why:
-
-- shared keys can hit rate limits
-- shared keys may stop working unexpectedly
-- using your own keys is more reliable and predictable
 
 ---
 
 ## Features
 
-### Series recognition
+### Metadata profiles
 
-- supports Kinopoisk-based resolution in `ru` profile
-- supports TMDb-based resolution in `intl` profile
-- supports direct manual `kp` id input during Kinopoisk selection
-- supports direct manual `tmdb` id input during TMDb selection
-- can reuse IDs already embedded in existing folder names
+The script supports two metadata profiles:
 
-Supported input ID variants:
+- `ru`
+- `intl`
 
-#### Kinopoisk
+#### `ru` profile
 
-- `[kp1234567]`
+- primary source: Kinopoisk
+- enrichment: TMDb
+- IMDb id: from Kinopoisk when available, otherwise from TMDb
+- primary title is usually Russian
+
+Resolution flow:
+
+```text
+kp -> tmdb ; imdb = kp if present else tmdb
+```
+
+#### `intl` profile
+
+- primary source: TMDb
+- IMDb id: from TMDb
+- Kinopoisk is not used as the primary metadata source
+- primary title is usually English / international
+
+Resolution flow:
+
+```text
+tmdb -> imdb
+```
+
+### Canonical ID formats
+
+The script always renders IDs in canonical Jellyfin-friendly form:
+
 - `[kp-1234567]`
-
-#### TMDb
-
-- `[tmdb12345]`
-- `[tmdb-12345]`
-- `[tmdbid-12345]`
-
-#### IMDb
-
-- `[tt1234567]`
-- `[imdbidtt1234567]`
-- `[imdbid=tt1234567]`
+- `[tmdbid-123456]`
 - `[imdbid-tt1234567]`
 
-All other bracketed tags in existing series folder names are treated as disposable noise during folder normalization and update mode.
+Older input forms are still recognized during parsing.
 
-Examples of removable noise:
+Supported incoming variants include:
 
-- `[WEB-DL]`
-- `[LostFilm]`
-- `[1080p]`
+- Kinopoisk:
+  - `[kp1234567]`
+  - `[kp-1234567]`
+
+- TMDb:
+  - `[tmdb12345]`
+  - `[tmdb-12345]`
+  - `[tmdbid-12345]`
+
+- IMDb:
+  - `[tt1234567]`
+  - `[imdbidtt1234567]`
+  - `[imdbid=tt1234567]`
+  - `[imdbid-tt1234567]`
+
+### Series recognition
+
+- searches series via Kinopoisk or TMDb depending on profile
+- supports direct `kp` id input during manual Kinopoisk selection
+- supports direct `tmdb` id input during manual TMDb selection
+- reuses IDs already embedded in folder names
+- supports tolerant parsing of old and new ID formats
 
 ### Folder normalization
 
 - normalizes the main series folder name using templates
 - normalizes season folder names
-- normalizes episode filenames
-- normalizes subtitle filenames
+- normalizes episode and subtitle filenames
 - can rename already identified but badly named source folders
+- can run in safe metadata-only update mode for already normalized series roots
 
-### Safe metadata-only update mode
+### Update mode
 
-`--update-series-folders` updates only the root series folders.
+`--update-series-folders`
 
-It does **not** move or rename season folders, episode files, or subtitle files.
+This mode:
 
-This mode is intended for safely:
+- scans already normalized root series folders
+- refreshes missing metadata and IDs
+- renames only the root series folder when needed
+- does **not** move episode or subtitle files
 
-- adding missing IDs
-- rebuilding canonical folder names
-- cleaning old noisy bracket tags
-- updating metadata on already organized libraries
+This is a safe metadata update mode.
 
 ### Episode recognition
 
@@ -195,8 +205,8 @@ Detects subtitle metadata from filenames and folders.
 
 Languages:
 
-- `ru`, `rus`, `russian` -> `rus`
-- `en`, `eng`, `english` -> `eng`
+- `ru`, `rus`, `russian` → `rus`
+- `en`, `eng`, `english` → `eng`
 
 Subtype:
 
@@ -215,39 +225,18 @@ When filenames do not explicitly contain a recognizable episode number:
 
 This makes the script resilient against badly named releases without trying to over-guess weird naming schemes.
 
-### Localized titles from TMDb translations
+### Conservative behavior
 
-The script can use localized title fields in templates, for example:
-
-- `{title_ru}`
-- `{title_en}`
-- `{title_de}`
-- `{title_fr}`
-- `{title_ko}`
-- `{title_pt_BR}`
-- `{title_zh_CN}`
-
-Localized title availability depends on TMDb translations for that specific show.
-
-Not every series has translations for every language.
-
-### Deduplication of title fields
-
-`{title}` is always the primary field.
-
-Before rendering:
-
-- if `{original_title}` is equal to `{title}`, it is cleared
-- if any `{title_XX}` is equal to `{title}`, it is cleared
-- if secondary fields duplicate each other, only the first unique value is kept and later duplicates are cleared
-
-This prevents folder names from containing repeated titles such as the same Russian title twice.
+- ambiguous subtitle-only files are not guessed aggressively
+- non-empty directories are not deleted
+- already normalized series are left untouched
+- `Ctrl+C` or menu option `0` exits cleanly
 
 ---
 
 ## Default resulting structure
 
-Default conservative output layout:
+Default output layout:
 
 ### `ru` profile
 
@@ -256,17 +245,6 @@ Default conservative output layout:
 └── Season {season:02d}/
     ├── S{season:02d}E{episode:02d}{ext}
     └── S{season:02d}E{episode:02d}.{subtype}.{lang}{ext}
-```
-
-Example:
-
-```text
-Блудливая Калифорния (Californication) (2007) [kp-394375][tmdbid-1215][imdbid-tt0904208]/
-└── Season 01/
-    ├── S01E01.avi
-    ├── S01E02.avi
-    ├── S01E02.eng.srt
-    └── S01E02.rus.srt
 ```
 
 ### `intl` profile
@@ -281,10 +259,10 @@ Example:
 Example:
 
 ```text
-Californication (2007) [tmdbid-1215][imdbid-tt0904208]/
+Блудливая Калифорния (Californication) (2007) [kp-394375][tmdbid-1215][imdbid-tt0904208]/
 └── Season 01/
-    ├── S01E01.avi
-    ├── S01E02.avi
+    ├── S01E01.mkv
+    ├── S01E02.mkv
     ├── S01E02.eng.srt
     └── S01E02.rus.srt
 ```
@@ -296,7 +274,7 @@ Californication (2007) [tmdbid-1215][imdbid-tt0904208]/
 ### Requirements
 
 - Python 3.10+
-- internet access for Kinopoisk and TMDb lookups
+- internet access for Kinopoisk and TMDb requests
 
 No external Python dependencies are required.
 
@@ -322,12 +300,6 @@ python SerialsRenamer.py /path/to/Serials --dry-run
 python SerialsRenamer.py /path/to/Serials --dry-first
 ```
 
-### Use Russian metadata profile
-
-```bash
-python SerialsRenamer.py /path/to/Serials --metadata-profile ru
-```
-
 ### Use international metadata profile
 
 ```bash
@@ -340,7 +312,7 @@ python SerialsRenamer.py /path/to/Serials --metadata-profile intl
 python SerialsRenamer.py /path/to/Serials --mode manual
 ```
 
-### Metadata-only root folder update
+### Update already normalized series root folders only
 
 ```bash
 python SerialsRenamer.py /path/to/Serials --update-series-folders --dry-run
@@ -352,13 +324,13 @@ python SerialsRenamer.py /path/to/Serials --update-series-folders --dry-run
 
 ```text
 root                    Root path to Serials
---cache                 Cache JSON path
+--cache                 Cache json path
 --ops-log               Operations log file path
 --metadata-profile      ru | intl
 --mode                  smart | manual
 --dry-first             Show resulting tree or folder update preview for each series and ask confirmation
---dry-run               Do not modify filesystem
---update-series-folders Only update existing root series folder names using fresh metadata; do not move episode/subtitle files
+--dry-run               Do not modify filesystem; only print/log planned operations
+--update-series-folders Only update existing root series folder names using fresh metadata
 ```
 
 ---
@@ -369,7 +341,7 @@ For each detected series, the script:
 
 1. scans files
 2. tries to infer title from folder structure
-3. resolves series metadata according to the selected profile
+3. resolves series metadata using the active profile
 4. builds a rename and move plan
 5. optionally shows preview
 6. applies changes after confirmation
@@ -379,10 +351,10 @@ For each detected series, the script:
 Typical options:
 
 - `0` — exit the whole script
-- `98` — skip current series
+- `98` — skip current search result selection
 - `99` — retry same search
 - `Enter` — accept the only result, when there is exactly one
-- any other text — new search query or direct id input
+- any other text — new search query or direct `kp` / `tmdb` id
 
 Examples of valid manual input:
 
@@ -399,10 +371,10 @@ With `--dry-first`, the script shows a per-series preview like this:
 
 ```text
 Planned tree:
-  Сопрано (The Sopranos) (1999) [kp-79848][tmdbid-1398][imdbid-tt0141842]/
-    [sopranos1] -> [Season 01]
-      The Sopranos [S01E01, Goblin].avi -> S01E01.avi
-      The Sopranos [S01E02, Goblin].avi -> S01E02.avi
+  Блудливая Калифорния (Californication) (2007) [kp-394375][tmdbid-1215][imdbid-tt0904208]/
+    [Season 01] -> [Season 01]
+      S01E01.mkv -> S01E01.mkv
+      S01E02.mkv -> S01E02.mkv
       ...
 ```
 
@@ -437,7 +409,7 @@ Typical entries:
 
 ```text
 ============================================================
-SERIES  Sopranos(full version)  ->  Сопрано (The Sopranos) (1999) [kp-79848][tmdbid-1398][imdbid-tt0141842]
+SERIES  Sopranos(full version)  ->  Блудливая Калифорния (Californication) (2007) [kp-394375][tmdbid-1215][imdbid-tt0904208]
 
 MOVE   sopranos1/The Sopranos [S01E01, Goblin].avi  =>  Season 01/S01E01.avi
 PAIRSB plevako/01 Плевако .2023.WEB-DLRip.Files-x.srt  =>  Season 01/S01E01.rus.srt
@@ -461,7 +433,7 @@ SUMMARY ops=18 removed_dirs=5 kept_dirs=1 errors=0
 
 ## Cache
 
-The script caches resolved series metadata to reduce repeated manual work.
+The script caches resolved metadata to reduce repeated manual work.
 
 Default cache file:
 
@@ -471,7 +443,7 @@ Default cache file:
 
 Cached data may include:
 
-- chosen primary title
+- chosen title
 - Kinopoisk ID
 - TMDb ID
 - IMDb ID
@@ -479,7 +451,7 @@ Cached data may include:
 - original title
 - localized titles
 
-When testing new localization or template behavior, it is recommended to use a fresh cache file or clear the existing cache.
+When testing template or localization changes, it is recommended to use a fresh cache file or delete the old one.
 
 ---
 
@@ -515,38 +487,45 @@ Localized title fields:
 - `{title_de}`
 - `{title_fr}`
 - `{title_ko}`
-- `{title_es}`
-- `{title_pt_BR}`
-- `{title_zh_CN}`
-- and other TMDb translation-derived fields when available
+- other `title_XX` fields, including regional variants such as `{title_pt_BR}` or `{title_zh_CN}`
 
-Other supported fields:
+Other fields:
 
 - `{kp}` — Kinopoisk ID without prefix
 - `{tmdb}` — TMDb ID without prefix
-- `{tt}` — IMDb ID including `tt` prefix
+- `{tt}` — IMDb ID including `tt`
 - `{year}` — release year
 - `{season}` — season number
 - `{episode}` — episode number
-- `{lang}` — subtitle language token
-- `{subtype}` — subtitle subtype token
-- `{ext}` — file extension including the dot
+- `{lang}` — subtitle language
+- `{subtype}` — subtitle subtype
+- `{ext}` — file extension including dot
+
+### Deduplication rules
+
+`{title}` is always the primary field.
+
+Before rendering:
+
+- if `{original_title}` is equal to `{title}`, it is cleared
+- if any `{title_XX}` is equal to `{title}`, it is cleared
+- if secondary fields duplicate each other, only the first unique value is kept and later duplicates are cleared
+
+Deduplication uses normalized title keys:
+
+- case-insensitive
+- repeated spaces ignored
+- separator and punctuation differences normalized
 
 ### Example custom templates
 
-Compact `intl`:
-
-```python
-INTL_SERIES_FOLDER_TEMPLATE = "{title} ({year}) [tmdbid-{tmdb}][imdbid-{tt}]"
-```
-
-`intl` with an extra localized title:
+Conservative `intl` variant with an extra Russian title:
 
 ```python
 INTL_SERIES_FOLDER_TEMPLATE = "{title} ({title_ru}) ({year}) [tmdbid-{tmdb}][imdbid-{tt}]"
 ```
 
-Verbose multilingual experiment:
+Verbose multilingual example:
 
 ```python
 INTL_SERIES_FOLDER_TEMPLATE = "{title} ({original_title}) ({title_ru}) ({title_fr}) ({year}) [tmdbid-{tmdb}][imdbid-{tt}]"
@@ -567,7 +546,7 @@ The script is intentionally conservative.
 - move paired subtitles together with fallback video
 - remove empty source directories
 - keep non-empty directories untouched
-- update already organized root series folders in metadata-only mode
+- update only root series folders in `--update-series-folders` mode
 
 ### It will not do
 
@@ -612,26 +591,23 @@ Becomes:
 Becomes:
 
 ```text
-Плевако (2023) [kp-4470538][tmdbid-...][imdbid-...]/
+Плевако (Plevako) (2023) [kp-4470538][tmdbid-000000][imdbid-tt0000000]/
 └── Season 01/
     ├── S01E01.avi
     ├── S01E02.avi
     └── ...
 ```
 
-### 3. Metadata-only root folder refresh
+### 3. Badly named fallback files
 
 ```text
-Адмирал Кузнецов (2024) [kp-5367251] [WEB-DL]/
+sopranos6/
+├── Klan_Soprano_VI_13_DVDRip.avi
+├── Klan_Soprano_VI_14_DVDRip.avi
+└── ...
 ```
 
-Can become:
-
-```text
-Адмирал Кузнецов (2024) [kp-5367251][tmdbid-249204][imdbid-tt31715424]/
-```
-
-without moving episode files.
+If explicit numbering is missing, files are assigned by sorted order and placed into the appropriate season without overwriting recognized targets.
 
 ---
 
@@ -649,12 +625,6 @@ This is the safest mode:
 - you can skip or re-search if needed
 - you can stop anytime with `0` or `Ctrl+C`
 
-For already organized libraries that only need canonical folder names refreshed:
-
-```bash
-python SerialsRenamer.py /path/to/Serials --update-series-folders --dry-first
-```
-
 Once you trust the current batch:
 
 ```bash
@@ -669,7 +639,6 @@ python SerialsRenamer.py /path/to/Serials
 - does not try to understand every possible custom fan naming scheme
 - subtitle-only ambiguous collections are intentionally not guessed too aggressively
 - roman numeral based episode detection is not supported directly unless sortable fallback is sufficient
-- not every series has TMDb translations for every language
 
 ---
 
