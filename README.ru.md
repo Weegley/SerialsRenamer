@@ -19,8 +19,8 @@ English version: [README.md](README.md)
 
 Скрипт использует:
 
-- **Kinopoisk Api Unofficial**
-- **TMDb**
+- [**Kinopoisk Api Unofficial**](https://kinopoiskapiunofficial.tech/)
+- [**TMDb**](https://www.themoviedb.org/)
 
 ### Kinopoisk Api Unofficial
 
