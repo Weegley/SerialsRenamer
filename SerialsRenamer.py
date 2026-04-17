@@ -30,7 +30,7 @@ from collections import defaultdict
 
 
 DEFAULT_KP_API_KEY = "85d30ae5-d875-4c5f-900d-8e37bb20625e"
-DEFAULT_TMDB_BEARER = "INSERT_YOUR_TMDB_BEARER_TOKEN_HERE_IT_IS_A_VERY_LONG_STRING"
+DEFAULT_TMDB_BEARER = "INSERT_YOUR_TMDB_BEARER_TOKEN_HERE"
 DEFAULT_CACHE_FILE = ".series_rename_cache.json"
 # Clear or replace the cache when testing new localization / template behavior.
 DEFAULT_OPS_LOG = "SerialsRenamer.operations.log"
@@ -180,9 +180,9 @@ RU_SERIES_FOLDER_TEMPLATE = "{title} ({original_title}) ({year}) [kp-{kp}][tmdbi
 INTL_SERIES_FOLDER_TEMPLATE = "{title} ({original_title}) ({year}) [tmdbid-{tmdb}][imdbid-{tt}]"
 RU_SEASON_FOLDER_TEMPLATE = "Season {season:02d}"
 INTL_SEASON_FOLDER_TEMPLATE = "Season {season:02d}"
-RU_EPISODE_FILE_TEMPLATE = "S{season:02d}E{episode:02d}{ext}"
+RU_EPISODE_FILE_TEMPLATE = "{title} ({original_title}) S{season:02d}E{episode:02d}{ext}"
 INTL_EPISODE_FILE_TEMPLATE = "S{season:02d}E{episode:02d}{ext}"
-RU_SUBTITLE_FILE_TEMPLATE = "S{season:02d}E{episode:02d}{sub_suffix}{ext}"
+RU_SUBTITLE_FILE_TEMPLATE = "{title} ({original_title}) S{season:02d}E{episode:02d}{sub_suffix}{ext}"
 INTL_SUBTITLE_FILE_TEMPLATE = "S{season:02d}E{episode:02d}{sub_suffix}{ext}"
 
 VIDEO_EXTS = {".mkv", ".mp4", ".avi", ".mov", ".m4v", ".ts"}
@@ -1498,9 +1498,20 @@ def print_series_summary(applied: int, errors: int, removed_dirs: int, kept_dirs
     print(f"{mode}: ops={applied}, removed_empty_dirs={removed_dirs}, kept_nonempty_dirs={kept_dirs}, errors={errors}")
 
 
+_LOG_WRITE_WARNING_SHOWN = False
+
+
 def log_line(log_path: Path, message: str) -> None:
-    with log_path.open("a", encoding="utf-8") as f:
-        f.write(message + "\n")
+    global _LOG_WRITE_WARNING_SHOWN
+    try:
+        with log_path.open("a", encoding="utf-8") as f:
+            f.write(message + "\n")
+    except KeyboardInterrupt:
+        raise
+    except OSError as e:
+        if not _LOG_WRITE_WARNING_SHOWN:
+            _LOG_WRITE_WARNING_SHOWN = True
+            print(f"WARNING: unable to write operations log: {e}", file=sys.stderr)
 
 
 def _relative_under(base: Path, path: Path) -> str:
@@ -1620,6 +1631,16 @@ def prune_empty_dirs(start_dir: Path, stop_dir: Path, log_path: Path, dry_run: b
 
 def save_cache(cache_path: Path, cache: dict) -> None:
     cache_path.write_text(json.dumps(cache, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def try_save_cache(cache_path: Path, cache: dict) -> Optional[str]:
+    try:
+        save_cache(cache_path, cache)
+        return None
+    except KeyboardInterrupt:
+        raise
+    except OSError as e:
+        return str(e)
 
 
 def load_cache(cache_path: Path) -> dict:
@@ -1771,14 +1792,22 @@ def main() -> int:
                 if decision == "3":
                     cache.pop(f"{args.metadata_profile}::{group.guessed_title.lower()}", None)
                     continue
-    except UserAbort:
+    except (UserAbort, KeyboardInterrupt):
         print()
         print("Exit requested. Stopping cleanly.")
     finally:
-        save_cache(cache_path, cache)
-        log_line(ops_log_path, f"END processed_groups={processed_groups} applied={total_applied} removed_dirs={total_removed_dirs} kept_dirs={total_kept_dirs} errors={total_errors}")
+        cache_save_error = try_save_cache(cache_path, cache)
+        try:
+            log_line(ops_log_path, f"END processed_groups={processed_groups} applied={total_applied} removed_dirs={total_removed_dirs} kept_dirs={total_kept_dirs} errors={total_errors}")
+        except KeyboardInterrupt:
+            print()
+            print("Exit requested while finalizing log.")
+            cache_save_error = cache_save_error or "interrupted while finalizing log"
     print()
-    print(f"Cache saved: {cache_path}")
+    if cache_save_error:
+        print(f"WARNING: cache was not saved: {cache_save_error}")
+    else:
+        print(f"Cache saved: {cache_path}")
     print(f"Operations log: {ops_log_path}")
     print("Dry-run complete." if args.dry_run else "Apply complete.")
     print(f"Processed groups: {processed_groups}")
