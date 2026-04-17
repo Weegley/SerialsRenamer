@@ -2,7 +2,7 @@
 
 Русская версия: [README.ru.md](README.ru.md)
 
-Production-oriented Python script for normalizing TV series folders and episode files.
+Production-oriented Python script for normalizing TV series folders and episode files for Jellyfin and similar media libraries.
 
 It helps reorganize messy TV series collections into a predictable structure:
 
@@ -10,7 +10,7 @@ It helps reorganize messy TV series collections into a predictable structure:
 Series Title (Original Title) (Year) [tmdbid-123456][imdbid-tt1234567]/
 └── Season 01/
     ├── S01E01.mkv
-    ├── S01E01.full.rus.srt
+    ├── S01E01.forced.rus.srt
     ├── S01E02.mkv
     └── ...
 ```
@@ -19,8 +19,8 @@ Series Title (Original Title) (Year) [tmdbid-123456][imdbid-tt1234567]/
 
 This script uses:
 
-- [**Kinopoisk Api Unofficial**](https://kinopoiskapiunofficial.tech/)
-- [**TMDb**](https://www.themoviedb.org/)
+- [Kinopoisk Api Unofficial](https://kinopoiskapiunofficial.tech)
+- [TMDb](https://www.themoviedb.org)
 
 ### Kinopoisk Api Unofficial
 
@@ -36,14 +36,19 @@ Why:
 
 ### TMDb
 
-For TMDb, you should **provide your own TMDb bearer token** in the script settings.
+For TMDb, you should set your own bearer token in:
 
-This is effectively required for real usage.
+```python
+DEFAULT_TMDB_BEARER = "..."
+```
 
-Why:
+If `DEFAULT_TMDB_BEARER` is empty or still contains the placeholder value, the script stops immediately with a clear error message.
 
-- TMDb is a core part of the current metadata pipeline
-- it is used directly in the `intl` profile
+If the token is present but invalid, the script shows the TMDb API error returned by the server.
+
+TMDb is effectively required for real usage because:
+
+- it is the primary source for the `intl` profile
 - it is used for enrichment, external IDs, and localized titles in the `ru` profile
 - multilingual title fields depend on TMDb translations
 
@@ -201,18 +206,34 @@ Supports subtitle files:
 - `.ssa`
 - `.sub`
 
-Detects subtitle metadata from filenames and folders.
+Legacy subtitle metadata detection still recognizes common tokens such as:
 
-Languages:
+- language:
+  - `ru`, `rus`, `russian`
+  - `en`, `eng`, `english`
+- subtype:
+  - `forced`
+  - `full`
+  - `sdh`
 
-- `ru`, `rus`, `russian` → `rus`
-- `en`, `eng`, `english` → `eng`
+### Subtitle suffix preservation
 
-Subtype:
+External subtitles are handled conservatively:
 
-- `forced`
-- `full`
-- `sdh`
+- the matching video filename is used as the base
+- everything after the video stem is treated as the subtitle suffix
+- the suffix is preserved in the final subtitle filename
+- suffix separators are normalized to dots
+
+Examples:
+
+- `Show S01E01.srt` → `S01E01.srt`
+- `Show S01E01_ru.srt` → `S01E01.ru.srt`
+- `Show S01E01.en.srt` → `S01E01.en.srt`
+- `Show S01E01_forced.rus.srt` → `S01E01.forced.rus.srt`
+- `Show S01E01_full.V1.rus.srt` → `S01E01.full.V1.rus.srt`
+
+This preserves useful suffix information without requiring the script to fully interpret every subtitle naming convention.
 
 ### Safe fallback logic
 
@@ -221,7 +242,8 @@ When filenames do not explicitly contain a recognizable episode number:
 - video files are assigned by sorted order within their source folder
 - numbering starts from `E01`
 - numbering skips already occupied targets
-- paired subtitles with the same normalized stem are moved together with the video
+- paired subtitles are matched against the corresponding video stem
+- paired subtitle suffixes are preserved and moved together with the video
 
 This makes the script resilient against badly named releases without trying to over-guess weird naming schemes.
 
@@ -231,6 +253,7 @@ This makes the script resilient against badly named releases without trying to o
 - non-empty directories are not deleted
 - already normalized series are left untouched
 - `Ctrl+C` or menu option `0` exits cleanly
+- cache and operations log failures are handled more gracefully on flaky or read-only paths
 
 ---
 
@@ -243,8 +266,8 @@ Default output layout:
 ```text
 {title} ({original_title}) ({year}) [kp-{kp}][tmdbid-{tmdb}][imdbid-{tt}]/
 └── Season {season:02d}/
-    ├── S{season:02d}E{episode:02d}{ext}
-    └── S{season:02d}E{episode:02d}.{subtype}.{lang}{ext}
+    ├── {title} ({original_title}) S{season:02d}E{episode:02d}{ext}
+    └── {title} ({original_title}) S{season:02d}E{episode:02d}{sub_suffix}{ext}
 ```
 
 ### `intl` profile
@@ -253,7 +276,7 @@ Default output layout:
 {title} ({original_title}) ({year}) [tmdbid-{tmdb}][imdbid-{tt}]/
 └── Season {season:02d}/
     ├── S{season:02d}E{episode:02d}{ext}
-    └── S{season:02d}E{episode:02d}.{subtype}.{lang}{ext}
+    └── S{season:02d}E{episode:02d}{sub_suffix}{ext}
 ```
 
 Example:
@@ -261,10 +284,10 @@ Example:
 ```text
 Блудливая Калифорния (Californication) (2007) [kp-394375][tmdbid-1215][imdbid-tt0904208]/
 └── Season 01/
-    ├── S01E01.mkv
-    ├── S01E02.mkv
-    ├── S01E02.eng.srt
-    └── S01E02.rus.srt
+    ├── Блудливая Калифорния (Californication) S01E01.mkv
+    ├── Блудливая Калифорния (Californication) S01E01.rus.srt
+    ├── Блудливая Калифорния (Californication) S01E01.forced.rus.srt
+    └── ...
 ```
 
 ---
@@ -373,8 +396,8 @@ With `--dry-first`, the script shows a per-series preview like this:
 Planned tree:
   Блудливая Калифорния (Californication) (2007) [kp-394375][tmdbid-1215][imdbid-tt0904208]/
     [Season 01] -> [Season 01]
-      S01E01.mkv -> S01E01.mkv
-      S01E02.mkv -> S01E02.mkv
+      Блудливая Калифорния (Californication) S01E01.mkv -> Блудливая Калифорния (Californication) S01E01.mkv
+      Блудливая Калифорния (Californication) S01E01_ru.srt -> Блудливая Калифорния (Californication) S01E01.ru.srt
       ...
 ```
 
@@ -383,7 +406,7 @@ Fallback assignments are displayed separately:
 ```text
 Fallback assignments:
   sopranos6/Klan_Soprano_VI_13_DVDRip.avi -> Season 06/S06E13.avi
-  sopranos6/Klan_Soprano_VI_14_DVDRip.avi -> Season 06/S06E14.avi
+  sopranos6/Klan_Soprano_VI_13_DVDRip_forced.rus.srt -> Season 06/S06E13.forced.rus.srt
   ...
 ```
 
@@ -412,7 +435,7 @@ Typical entries:
 SERIES  Sopranos(full version)  ->  Блудливая Калифорния (Californication) (2007) [kp-394375][tmdbid-1215][imdbid-tt0904208]
 
 MOVE   sopranos1/The Sopranos [S01E01, Goblin].avi  =>  Season 01/S01E01.avi
-PAIRSB plevako/01 Плевако .2023.WEB-DLRip.Files-x.srt  =>  Season 01/S01E01.rus.srt
+PAIRSB plevako/01 Плевако .2023.WEB-DLRip.Files-x_forced.rus.srt  =>  Season 01/S01E01.forced.rus.srt
 FALLBK sopranos6/Klan_Soprano_VI_13_DVDRip.avi  =>  Season 06/S06E13.avi
 DELDIR old_subfolder
 KEEPDIR leftovers  ::  not empty
@@ -453,6 +476,8 @@ Cached data may include:
 
 When testing template or localization changes, it is recommended to use a fresh cache file or delete the old one.
 
+If cache saving fails on a network path or due to permissions, the script prints a warning and continues shutdown cleanly.
+
 ---
 
 ## Naming templates
@@ -466,10 +491,10 @@ RU_SERIES_FOLDER_TEMPLATE = "{title} ({original_title}) ({year}) [kp-{kp}][tmdbi
 INTL_SERIES_FOLDER_TEMPLATE = "{title} ({original_title}) ({year}) [tmdbid-{tmdb}][imdbid-{tt}]"
 RU_SEASON_FOLDER_TEMPLATE = "Season {season:02d}"
 INTL_SEASON_FOLDER_TEMPLATE = "Season {season:02d}"
-RU_EPISODE_FILE_TEMPLATE = "S{season:02d}E{episode:02d}{ext}"
+RU_EPISODE_FILE_TEMPLATE = "{title} ({original_title}) S{season:02d}E{episode:02d}{ext}"
 INTL_EPISODE_FILE_TEMPLATE = "S{season:02d}E{episode:02d}{ext}"
-RU_SUBTITLE_FILE_TEMPLATE = "S{season:02d}E{episode:02d}.{subtype}.{lang}{ext}"
-INTL_SUBTITLE_FILE_TEMPLATE = "S{season:02d}E{episode:02d}.{subtype}.{lang}{ext}"
+RU_SUBTITLE_FILE_TEMPLATE = "{title} ({original_title}) S{season:02d}E{episode:02d}{sub_suffix}{ext}"
+INTL_SUBTITLE_FILE_TEMPLATE = "S{season:02d}E{episode:02d}{sub_suffix}{ext}"
 ```
 
 ### Available template fields
@@ -497,9 +522,24 @@ Other fields:
 - `{year}` — release year
 - `{season}` — season number
 - `{episode}` — episode number
-- `{lang}` — subtitle language
-- `{subtype}` — subtitle subtype
+- `{lang}` — subtitle language token
+- `{subtype}` — subtitle subtype token
+- `{sub_suffix}` — preserved subtitle suffix after the matching video stem
 - `{ext}` — file extension including dot
+
+### Subtitle suffix notes
+
+`{sub_suffix}` is intended for subtitle templates.
+
+It preserves the raw suffix part that follows the matching video filename and normalizes separators to dots.
+
+Examples:
+
+- empty suffix → `""`
+- `_ru` → `.ru`
+- `.en` → `.en`
+- `_forced.rus` → `.forced.rus`
+- `_full.V1.rus` → `.full.V1.rus`
 
 ### Deduplication rules
 
@@ -543,6 +583,7 @@ The script is intentionally conservative.
 
 - rename and reorganize recognized files
 - use fallback only for sortable unknown video files
+- preserve subtitle suffixes when a matching video stem is found
 - move paired subtitles together with fallback video
 - remove empty source directories
 - keep non-empty directories untouched
@@ -591,23 +632,34 @@ Becomes:
 Becomes:
 
 ```text
-Плевако (Plevako) (2023) [kp-4470538][tmdbid-000000][imdbid-tt0000000]/
+Плевако (Plevako) (2023) [kp-4470538][tmdbid-248177][imdbid-tt27987974]/
 └── Season 01/
-    ├── S01E01.avi
-    ├── S01E02.avi
+    ├── Плевако (Plevako) S01E01.avi
+    ├── Плевако (Plevako) S01E02.avi
     └── ...
 ```
 
-### 3. Badly named fallback files
+### 3. Subtitle suffix preservation
 
 ```text
-sopranos6/
-├── Klan_Soprano_VI_13_DVDRip.avi
-├── Klan_Soprano_VI_14_DVDRip.avi
-└── ...
+Season 01/
+├── Show S01E01.avi
+├── Show S01E01_ru.srt
+├── Show S01E01.en.srt
+├── Show S01E01_forced.rus.srt
+└── Show S01E01_full.V1.rus.srt
 ```
 
-If explicit numbering is missing, files are assigned by sorted order and placed into the appropriate season without overwriting recognized targets.
+Becomes:
+
+```text
+Season 01/
+├── S01E01.avi
+├── S01E01.ru.srt
+├── S01E01.en.srt
+├── S01E01.forced.rus.srt
+└── S01E01.full.V1.rus.srt
+```
 
 ---
 
@@ -646,8 +698,9 @@ python SerialsRenamer.py /path/to/Serials
 
 - `0` in menus exits the whole script cleanly
 - `Ctrl+C` also exits cleanly
-- cache is still saved on exit
-- operations log is still finalized on exit
+- cache is still saved on exit when possible
+- cache save failures are downgraded to warnings
+- operations log finalization is handled more defensively on flaky paths
 
 ---
 

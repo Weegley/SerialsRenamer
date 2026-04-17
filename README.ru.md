@@ -2,7 +2,7 @@
 
 English version: [README.md](README.md)
 
-Производственный Python-скрипт для нормализации папок сериалов и файлов эпизодов.
+Производственный Python-скрипт для нормализации папок сериалов и файлов эпизодов для Jellyfin и похожих медиабиблиотек.
 
 Он помогает привести хаотичную коллекцию сериалов к предсказуемой структуре:
 
@@ -10,7 +10,7 @@ English version: [README.md](README.md)
 Название сериала (Оригинальное название) (Год) [tmdbid-123456][imdbid-tt1234567]/
 └── Season 01/
     ├── S01E01.mkv
-    ├── S01E01.full.rus.srt
+    ├── S01E01.forced.rus.srt
     ├── S01E02.mkv
     └── ...
 ```
@@ -19,8 +19,8 @@ English version: [README.md](README.md)
 
 Скрипт использует:
 
-- [**Kinopoisk Api Unofficial**](https://kinopoiskapiunofficial.tech/)
-- [**TMDb**](https://www.themoviedb.org/)
+- [Kinopoisk Api Unofficial](https://kinopoiskapiunofficial.tech)
+- [TMDb](https://www.themoviedb.org)
 
 ### Kinopoisk Api Unofficial
 
@@ -36,13 +36,18 @@ English version: [README.md](README.md)
 
 ### TMDb
 
-Для TMDb нужно **обязательно указать свой собственный bearer token** в настройках скрипта.
+Для TMDb нужно указать свой bearer token в:
 
-На практике это обязательно для нормальной работы.
+```python
+DEFAULT_TMDB_BEARER = "..."
+```
 
-Почему:
+Если `DEFAULT_TMDB_BEARER` пустой или всё ещё содержит значение-заглушку, скрипт сразу завершится с понятной ошибкой.
 
-- TMDb является важной частью текущего пайплайна метаданных
+Если токен указан, но неверный, скрипт покажет ошибку TMDb API, которую вернул сервер.
+
+На практике TMDb обязателен для нормальной работы, потому что:
+
 - профиль `intl` напрямую работает через TMDb
 - профиль `ru` использует TMDb для enrichment, external IDs и локализованных названий
 - мультиязычные поля `title_XX` зависят от TMDb translations
@@ -201,18 +206,34 @@ tmdb -> imdb
 - `.ssa`
 - `.sub`
 
-Скрипт извлекает метаданные субтитров из имён файлов и папок.
+Старое распознавание метаданных субтитров по-прежнему понимает типовые токены:
 
-Языки:
+- язык:
+  - `ru`, `rus`, `russian`
+  - `en`, `eng`, `english`
+- тип:
+  - `forced`
+  - `full`
+  - `sdh`
 
-- `ru`, `rus`, `russian` → `rus`
-- `en`, `eng`, `english` → `eng`
+### Сохранение subtitle suffix
 
-Типы:
+Внешние субтитры теперь обрабатываются консервативно:
 
-- `forced`
-- `full`
-- `sdh`
+- за базу берётся имя соответствующего видеофайла
+- всё, что идёт после stem видео, считается subtitle suffix
+- suffix сохраняется в итоговом имени субтитра
+- разделители в suffix нормализуются к точкам
+
+Примеры:
+
+- `Show S01E01.srt` → `S01E01.srt`
+- `Show S01E01_ru.srt` → `S01E01.ru.srt`
+- `Show S01E01.en.srt` → `S01E01.en.srt`
+- `Show S01E01_forced.rus.srt` → `S01E01.forced.rus.srt`
+- `Show S01E01_full.V1.rus.srt` → `S01E01.full.V1.rus.srt`
+
+Это позволяет сохранить полезную suffix-информацию без попытки полностью “понять” каждую экзотическую схему именования субтитров.
 
 ### Безопасная fallback-логика
 
@@ -221,7 +242,8 @@ tmdb -> imdb
 - видеофайлы назначаются по отсортированному порядку внутри исходной папки
 - нумерация начинается с `E01`
 - уже занятые целевые имена пропускаются
-- парные субтитры с тем же нормализованным stem перемещаются вместе с видео
+- парные субтитры ищутся относительно соответствующего stem видео
+- suffix таких субтитров сохраняется и переносится вместе с видео
 
 Это делает скрипт устойчивым к плохо названным релизам без попытки слишком агрессивно угадывать экзотические схемы именования.
 
@@ -231,6 +253,7 @@ tmdb -> imdb
 - непустые папки не удаляются
 - уже нормализованные сериалы не трогаются
 - `Ctrl+C` или пункт меню `0` завершают работу корректно
+- ошибки записи cache и log на проблемных путях обрабатываются мягче
 
 ---
 
@@ -243,8 +266,8 @@ tmdb -> imdb
 ```text
 {title} ({original_title}) ({year}) [kp-{kp}][tmdbid-{tmdb}][imdbid-{tt}]/
 └── Season {season:02d}/
-    ├── S{season:02d}E{episode:02d}{ext}
-    └── S{season:02d}E{episode:02d}.{subtype}.{lang}{ext}
+    ├── {title} ({original_title}) S{season:02d}E{episode:02d}{ext}
+    └── {title} ({original_title}) S{season:02d}E{episode:02d}{sub_suffix}{ext}
 ```
 
 ### Профиль `intl`
@@ -253,7 +276,7 @@ tmdb -> imdb
 {title} ({original_title}) ({year}) [tmdbid-{tmdb}][imdbid-{tt}]/
 └── Season {season:02d}/
     ├── S{season:02d}E{episode:02d}{ext}
-    └── S{season:02d}E{episode:02d}.{subtype}.{lang}{ext}
+    └── S{season:02d}E{episode:02d}{sub_suffix}{ext}
 ```
 
 Пример:
@@ -261,10 +284,10 @@ tmdb -> imdb
 ```text
 Блудливая Калифорния (Californication) (2007) [kp-394375][tmdbid-1215][imdbid-tt0904208]/
 └── Season 01/
-    ├── S01E01.mkv
-    ├── S01E02.mkv
-    ├── S01E02.eng.srt
-    └── S01E02.rus.srt
+    ├── Блудливая Калифорния (Californication) S01E01.mkv
+    ├── Блудливая Калифорния (Californication) S01E01.rus.srt
+    ├── Блудливая Калифорния (Californication) S01E01.forced.rus.srt
+    └── ...
 ```
 
 ---
@@ -373,8 +396,8 @@ root                    Корневой путь к папке Serials
 Planned tree:
   Блудливая Калифорния (Californication) (2007) [kp-394375][tmdbid-1215][imdbid-tt0904208]/
     [Season 01] -> [Season 01]
-      S01E01.mkv -> S01E01.mkv
-      S01E02.mkv -> S01E02.mkv
+      Блудливая Калифорния (Californication) S01E01.mkv -> Блудливая Калифорния (Californication) S01E01.mkv
+      Блудливая Калифорния (Californication) S01E01_ru.srt -> Блудливая Калифорния (Californication) S01E01.ru.srt
       ...
 ```
 
@@ -383,7 +406,7 @@ Fallback-назначения выводятся отдельно:
 ```text
 Fallback assignments:
   sopranos6/Klan_Soprano_VI_13_DVDRip.avi -> Season 06/S06E13.avi
-  sopranos6/Klan_Soprano_VI_14_DVDRip.avi -> Season 06/S06E14.avi
+  sopranos6/Klan_Soprano_VI_13_DVDRip_forced.rus.srt -> Season 06/S06E13.forced.rus.srt
   ...
 ```
 
@@ -412,7 +435,7 @@ SerialsRenamer.operations.log
 SERIES  Sopranos(full version)  ->  Блудливая Калифорния (Californication) (2007) [kp-394375][tmdbid-1215][imdbid-tt0904208]
 
 MOVE   sopranos1/The Sopranos [S01E01, Goblin].avi  =>  Season 01/S01E01.avi
-PAIRSB plevako/01 Плевако .2023.WEB-DLRip.Files-x.srt  =>  Season 01/S01E01.rus.srt
+PAIRSB plevako/01 Плевако .2023.WEB-DLRip.Files-x_forced.rus.srt  =>  Season 01/S01E01.forced.rus.srt
 FALLBK sopranos6/Klan_Soprano_VI_13_DVDRip.avi  =>  Season 06/S06E13.avi
 DELDIR old_subfolder
 KEEPDIR leftovers  ::  not empty
@@ -453,6 +476,8 @@ SUMMARY ops=18 removed_dirs=5 kept_dirs=1 errors=0
 
 При тестировании новых шаблонов или логики локализаций рекомендуется использовать новый cache-файл или удалить старый.
 
+Если сохранение cache не удалось из-за сетевого пути или прав доступа, скрипт покажет предупреждение и завершится без traceback.
+
 ---
 
 ## Шаблоны именования
@@ -466,10 +491,10 @@ RU_SERIES_FOLDER_TEMPLATE = "{title} ({original_title}) ({year}) [kp-{kp}][tmdbi
 INTL_SERIES_FOLDER_TEMPLATE = "{title} ({original_title}) ({year}) [tmdbid-{tmdb}][imdbid-{tt}]"
 RU_SEASON_FOLDER_TEMPLATE = "Season {season:02d}"
 INTL_SEASON_FOLDER_TEMPLATE = "Season {season:02d}"
-RU_EPISODE_FILE_TEMPLATE = "S{season:02d}E{episode:02d}{ext}"
+RU_EPISODE_FILE_TEMPLATE = "{title} ({original_title}) S{season:02d}E{episode:02d}{ext}"
 INTL_EPISODE_FILE_TEMPLATE = "S{season:02d}E{episode:02d}{ext}"
-RU_SUBTITLE_FILE_TEMPLATE = "S{season:02d}E{episode:02d}.{subtype}.{lang}{ext}"
-INTL_SUBTITLE_FILE_TEMPLATE = "S{season:02d}E{episode:02d}.{subtype}.{lang}{ext}"
+RU_SUBTITLE_FILE_TEMPLATE = "{title} ({original_title}) S{season:02d}E{episode:02d}{sub_suffix}{ext}"
+INTL_SUBTITLE_FILE_TEMPLATE = "S{season:02d}E{episode:02d}{sub_suffix}{ext}"
 ```
 
 ### Доступные поля шаблонов
@@ -497,9 +522,24 @@ INTL_SUBTITLE_FILE_TEMPLATE = "S{season:02d}E{episode:02d}.{subtype}.{lang}{ext}
 - `{year}` — год выхода
 - `{season}` — номер сезона
 - `{episode}` — номер эпизода
-- `{lang}` — язык субтитра
-- `{subtype}` — тип субтитра
+- `{lang}` — language token субтитра
+- `{subtype}` — subtype token субтитра
+- `{sub_suffix}` — сохранённый suffix субтитра после matching video stem
 - `{ext}` — расширение файла вместе с точкой
+
+### Примечания по `{sub_suffix}`
+
+`{sub_suffix}` предназначен для subtitle template.
+
+Он сохраняет “сырой” suffix, который идёт после имени соответствующего видеофайла, и нормализует разделители к точкам.
+
+Примеры:
+
+- пустой suffix → `""`
+- `_ru` → `.ru`
+- `.en` → `.en`
+- `_forced.rus` → `.forced.rus`
+- `_full.V1.rus` → `.full.V1.rus`
 
 ### Правила дедупликации
 
@@ -543,6 +583,7 @@ INTL_SERIES_FOLDER_TEMPLATE = "{title} ({original_title}) ({title_ru}) ({title_f
 
 - переименовывает и реорганизует распознанные файлы
 - использует fallback только для сортируемых неизвестных видеофайлов
+- сохраняет subtitle suffix, если найден matching video stem
 - перемещает парные субтитры вместе с fallback-видео
 - удаляет пустые исходные папки
 - оставляет непустые папки на месте
@@ -591,23 +632,34 @@ Sopranos(full version)/
 Станет:
 
 ```text
-Плевако (Plevako) (2023) [kp-4470538][tmdbid-000000][imdbid-tt0000000]/
+Плевако (Plevako) (2023) [kp-4470538][tmdbid-248177][imdbid-tt27987974]/
 └── Season 01/
-    ├── S01E01.avi
-    ├── S01E02.avi
+    ├── Плевако (Plevako) S01E01.avi
+    ├── Плевако (Plevako) S01E02.avi
     └── ...
 ```
 
-### 3. Плохо названные fallback-файлы
+### 3. Сохранение subtitle suffix
 
 ```text
-sopranos6/
-├── Klan_Soprano_VI_13_DVDRip.avi
-├── Klan_Soprano_VI_14_DVDRip.avi
-└── ...
+Season 01/
+├── Show S01E01.avi
+├── Show S01E01_ru.srt
+├── Show S01E01.en.srt
+├── Show S01E01_forced.rus.srt
+└── Show S01E01_full.V1.rus.srt
 ```
 
-Если явная нумерация не найдена, файлы назначаются по отсортированному порядку и размещаются в нужный сезон без перезаписи уже распознанных целей.
+Станет:
+
+```text
+Season 01/
+├── S01E01.avi
+├── S01E01.ru.srt
+├── S01E01.en.srt
+├── S01E01.forced.rus.srt
+└── S01E01.full.V1.rus.srt
+```
 
 ---
 
@@ -646,8 +698,9 @@ python SerialsRenamer.py /path/to/Serials
 
 - `0` в меню корректно завершает весь скрипт
 - `Ctrl+C` тоже завершает работу корректно
-- cache при этом всё равно сохраняется
-- log операций тоже корректно финализируется
+- cache сохраняется при выходе, если это возможно
+- ошибки сохранения cache понижаются до warning
+- финализация operations log на проблемных путях стала безопаснее
 
 ---
 

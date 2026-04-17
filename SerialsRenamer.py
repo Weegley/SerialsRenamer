@@ -26,6 +26,7 @@ from string import Formatter
 from typing import Optional, List, Dict, Tuple, Any, Set
 from urllib.parse import urlencode, quote
 from urllib.request import Request, urlopen
+from urllib.error import HTTPError
 from collections import defaultdict
 
 
@@ -176,14 +177,19 @@ MAX_PREVIEW_FALLBACK_FILES = 12
 #   - if {title_ru} == {title}, {title_ru} is cleared
 #   - if secondary fields duplicate each other, only the first unique value is kept
 
+
 RU_SERIES_FOLDER_TEMPLATE = "{title} ({original_title}) ({year}) [kp-{kp}][tmdbid-{tmdb}][imdbid-{tt}]"
 INTL_SERIES_FOLDER_TEMPLATE = "{title} ({original_title}) ({year}) [tmdbid-{tmdb}][imdbid-{tt}]"
+
 RU_SEASON_FOLDER_TEMPLATE = "Season {season:02d}"
 INTL_SEASON_FOLDER_TEMPLATE = "Season {season:02d}"
-RU_EPISODE_FILE_TEMPLATE = "{title} ({original_title}) S{season:02d}E{episode:02d}{ext}"
+
+RU_EPISODE_FILE_TEMPLATE = "S{season:02d}E{episode:02d}{ext}"
 INTL_EPISODE_FILE_TEMPLATE = "S{season:02d}E{episode:02d}{ext}"
-RU_SUBTITLE_FILE_TEMPLATE = "{title} ({original_title}) S{season:02d}E{episode:02d}{sub_suffix}{ext}"
+
+RU_SUBTITLE_FILE_TEMPLATE = "S{season:02d}E{episode:02d}{sub_suffix}{ext}"
 INTL_SUBTITLE_FILE_TEMPLATE = "S{season:02d}E{episode:02d}{sub_suffix}{ext}"
+
 
 VIDEO_EXTS = {".mkv", ".mp4", ".avi", ".mov", ".m4v", ".ts"}
 SUB_EXTS = {".srt", ".ass", ".ssa", ".sub"}
@@ -320,8 +326,25 @@ class TMDbClient:
             "Authorization": f"Bearer {self.bearer_token}",
             "Accept": "application/json",
         })
-        with urlopen(req, timeout=self.timeout) as resp:
-            return json.loads(resp.read().decode("utf-8"))
+        try:
+            with urlopen(req, timeout=self.timeout) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+        except HTTPError as e:
+            try:
+                payload = json.loads(e.read().decode("utf-8"))
+            except Exception:
+                payload = None
+            if isinstance(payload, dict):
+                status_code = payload.get("status_code")
+                status_message = payload.get("status_message")
+                if status_code or status_message:
+                    raise RuntimeError(f"TMDb API error {status_code}: {status_message}") from None
+            raise RuntimeError(f"TMDb request failed: HTTP {e.code}") from None
+        if isinstance(data, dict) and data.get("success") is False and (data.get("status_code") or data.get("status_message")):
+            status_code = data.get("status_code")
+            status_message = data.get("status_message")
+            raise RuntimeError(f"TMDb API error {status_code}: {status_message}")
+        return data
 
     def search_tv(self, query: str, language: str = "en-US", year: Optional[str] = None, page: int = 1) -> list:
         params = {"query": query, "language": language, "page": page}
@@ -1652,6 +1675,13 @@ def load_cache(cache_path: Path) -> dict:
         return {}
 
 
+def validate_tmdb_bearer_or_exit() -> Optional[str]:
+    token = str(DEFAULT_TMDB_BEARER or "").strip()
+    if not token or token == "INSERT_YOUR_TMDB_BEARER_TOKEN_HERE":
+        return "TMDb bearer token is not configured. Set DEFAULT_TMDB_BEARER in the script settings."
+    return None
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Normalize TV series tree. Applies changes immediately per series; use --dry-run to preview only.",
@@ -1686,6 +1716,10 @@ def main() -> int:
         validate_templates()
     except ValueError as e:
         print(f"ERROR: template validation failed: {e}")
+        return 1
+    tmdb_bearer_error = validate_tmdb_bearer_or_exit()
+    if tmdb_bearer_error:
+        print(f"ERROR: {tmdb_bearer_error}")
         return 1
     kp = KPClient(DEFAULT_KP_API_KEY)
     tmdb = TMDbClient(DEFAULT_TMDB_BEARER)
